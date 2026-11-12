@@ -74,7 +74,7 @@ export function createApp(ctx: Ctx, opts: { staticDir?: string } = {}) {
   if (staticDir && existsSync(join(staticDir, 'index.html'))) {
     app.use(express.static(staticDir, { index: false, maxAge: '1h' }));
     app.use((req, res, next) => {
-      if (req.method !== 'GET') return next();
+      if (req.method !== 'GET' && req.method !== 'HEAD') return next();
       res.sendFile(join(staticDir, 'index.html'));
     });
   }

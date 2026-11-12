@@ -52,7 +52,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     mapCenter: {
       lat: num(env, 'MAP_CENTER_LAT', 40.7359),
       lng: num(env, 'MAP_CENTER_LNG', -73.9911),
-      zoom: num(env, 'MAP_ZOOM', 13),
+      zoom: num(env, 'MAP_ZOOM', 14),
     },
     tileUrl: env.TILE_URL ?? 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     tileAttribution:

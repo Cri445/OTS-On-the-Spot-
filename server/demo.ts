@@ -181,9 +181,9 @@ export function seedAround(ctx: Ctx, lat: number, lng: number, tzOffsetMinutes: 
     const lngScale = Math.max(0.2, Math.cos((lat * Math.PI) / 180));
     SAMPLES.forEach((s, i) => {
       const start = resolveStart(ctx, s.when, tzOffsetMinutes);
-      // A loose ring of pins within about 2.5 km of the centre.
-      const angle = (i / SAMPLES.length) * 2 * Math.PI + Math.random() * 0.5;
-      const km = 0.4 + Math.random() * 2.1;
+      // A loose spiral of pins within about 2.5 km of the centre, spaced so they don't pile up.
+      const angle = i * 2.4 + Math.random() * 0.3;
+      const km = 0.35 + 2.1 * Math.sqrt((i + 0.5) / SAMPLES.length) + Math.random() * 0.15;
       const id = insertActivity(
         ctx,
         hosts[i % hosts.length],
