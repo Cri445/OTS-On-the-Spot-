@@ -168,7 +168,7 @@ export function DoorList() {
           <ul className="door">
             {shown.map((x) => (
               <li key={x.ticketId} className={cx(x.checkedInAt && 'is-in')}>
-                <Avatar name={x.displayName} color={x.avatarColor} />
+                <Avatar name={x.displayName} color={x.avatarColor} src={x.avatarUrl} />
                 <div className="door__who">
                   <strong>{showLegal && x.legalName ? x.legalName : x.displayName}</strong>
                   <span className="muted">

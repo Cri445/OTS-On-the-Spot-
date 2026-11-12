@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import type { ActivitySummary } from '../../shared/types';
 import { useApp } from '../app-context';
 import { dayLabel, formatDistance, formatDuration, formatTime, phaseOf } from '../lib/format';
+import { categoryOf } from '../../shared/catalog';
 import { ActivityTags, CategoryIcon, SpotsBar, cx } from './ui';
 
 interface Props {
@@ -36,7 +37,16 @@ export function ActivityCard({ a, now, distanceKm, active, onHover }: Props) {
       onFocus={() => onHover?.(a.id)}
       onBlur={() => onHover?.(null)}
     >
-      <CategoryIcon a={a} />
+      {a.coverUrl ? (
+        <span className="acard__thumb">
+          <img src={a.coverUrl} alt="" loading="lazy" />
+          <span className="acard__emoji" aria-hidden>
+            {categoryOf(a.category).emoji}
+          </span>
+        </span>
+      ) : (
+        <CategoryIcon a={a} />
+      )}
       <div className="acard__body">
         <div className="acard__top">
           <h3>{a.title}</h3>

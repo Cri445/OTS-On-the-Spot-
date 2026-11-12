@@ -3,11 +3,12 @@ import { ArrowLeft, EyeOff, LocateFixed, Lock, Minus, Plus, Search, ShieldCheck,
 import { Link, useNavigate, useParams } from 'react-router';
 import { CATEGORIES, TAGS, VIBES, categoryOf, type CategoryId, type TagId, type VibeId } from '../../shared/catalog';
 import { commissionCents } from '../../shared/money';
-import type { ActivityDetail, Security } from '../../shared/types';
+import type { ActivityDetail, Photo, Security } from '../../shared/types';
 import { api, errorMessage, post } from '../api';
 import { useApp } from '../app-context';
 import { PinMap } from '../components/maps';
 import { PaymentSheet } from '../components/PaymentSheet';
+import { MAX_PHOTOS, PhotoPicker } from '../components/Photos';
 import { LoadState, Spinner, VibeChip, cx } from '../components/ui';
 import { dayLabel, formatTime, plural, type LatLng } from '../lib/format';
 import { reverseGeocode, searchAddress, type Place } from '../lib/geocode';
@@ -27,10 +28,13 @@ interface Draft {
   capacity: number;
   price: string;
   security: Security;
+  minAge: number | null;
+  photos: Photo[];
   featured: boolean;
 }
 
 const DURATIONS = [30, 60, 90, 120, 180, 240, 300, 360, 480, 720];
+const AGE_PRESETS = [16, 18, 21];
 const durationLabel = (min: number) => (min < 60 ? `${min} minutes` : min % 60 ? `${Math.floor(min / 60)} h ${min % 60} min` : plural(min / 60, 'hour'));
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -45,7 +49,7 @@ function blankDraft(): Draft {
     title: '', description: '', category: '', vibe: '', tags: [],
     date: localDate(start), time: localTime(start), durationMin: 120,
     pos: null, address: '', hideExact: false,
-    capacity: 10, price: '', security: 'open', featured: false,
+    capacity: 10, price: '', security: 'open', minAge: null, photos: [], featured: false,
   };
 }
 
@@ -55,7 +59,7 @@ function draftFrom(a: ActivityDetail): Draft {
     title: a.title, description: a.description, category: a.category, vibe: a.vibe, tags: a.tags,
     date: localDate(start), time: localTime(start), durationMin: Math.round((Date.parse(a.endsAt) - start.getTime()) / 60_000),
     pos: { lat: a.lat, lng: a.lng }, address: a.address ?? '', hideExact: a.hideExact,
-    capacity: a.capacity, price: a.priceCents ? (a.priceCents / 100).toFixed(2) : '', security: a.security, featured: a.featured,
+    capacity: a.capacity, price: a.priceCents ? (a.priceCents / 100).toFixed(2) : '', security: a.security, minAge: a.minAge, photos: a.photos, featured: a.featured,
   };
 }
 
@@ -79,6 +83,7 @@ export function HostForm() {
   const [error, setError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [customAge, setCustomAge] = useState(false);
   const set = (patch: Partial<Draft>) => {
     setDraft((prev) => ({ ...prev, ...patch }));
     setError(null);
@@ -91,6 +96,7 @@ export function HostForm() {
         if (!activity.viewer.isHost) return setLoadError('Only the host can edit this activity.');
         setOriginal(activity);
         setDraft(draftFrom(activity));
+        setCustomAge(activity.minAge !== null && !AGE_PRESETS.includes(activity.minAge));
       })
       .catch((err) => setLoadError(errorMessage(err)));
   }, [editId]);
@@ -158,11 +164,14 @@ export function HostForm() {
     if (priceCents !== 0 && (priceCents < config.minPriceCents || priceCents > config.maxPriceCents)) {
       return `Make it free, or charge between ${money(config.minPriceCents)} and ${money(config.maxPriceCents)}.`;
     }
+    if (customAge && (d.minAge === null || d.minAge < config.minAccountAge || d.minAge > 99)) {
+      return `Set the age limit to ${config.minAccountAge} or more — or choose "No limit".`;
+    }
     return null;
   }
 
   function body() {
-    const always = { title: d.title.trim(), description: d.description.trim(), category: d.category, vibe: d.vibe, tags: d.tags, capacity: d.capacity };
+    const always = { title: d.title.trim(), description: d.description.trim(), category: d.category, vibe: d.vibe, tags: d.tags, capacity: d.capacity, photos: d.photos.map((p) => p.id) };
     if (locked) return always;
     return {
       ...always,
@@ -174,6 +183,7 @@ export function HostForm() {
       endsAt: new Date(start.getTime() + d.durationMin * 60_000).toISOString(),
       priceCents,
       security: d.security,
+      minAge: d.minAge,
     };
   }
 
@@ -209,6 +219,7 @@ export function HostForm() {
   }
 
   const category = d.category ? categoryOf(d.category) : null;
+  const ages = AGE_PRESETS.filter((age) => age >= config.minAccountAge);
   const durations = DURATIONS.includes(d.durationMin) ? DURATIONS : [...DURATIONS, d.durationMin].sort((a, b) => a - b);
 
   return (
@@ -225,7 +236,7 @@ export function HostForm() {
           <Lock size={18} aria-hidden />
           <div>
             <strong>Guests have already joined</strong>
-            <p>They signed up for this time, place and price, so those are locked. You can still change the description, the tags and the number of spots.</p>
+            <p>They signed up for this time, place, price and guest rules, so those are locked. You can still change the description, the photos, the tags and the number of spots.</p>
           </div>
         </div>
       )}
@@ -255,6 +266,14 @@ export function HostForm() {
               </span>
               <textarea className="input" rows={4} value={d.description} onChange={(e) => set({ description: e.target.value })} maxLength={2000} placeholder="What's the plan, what should people bring, who is it for?" />
             </label>
+          </section>
+
+          <section className="card">
+            <h2>
+              Photos <small>optional · free</small>
+            </h2>
+            <p className="muted">Show people the place. The first photo is the cover — it leads your page and shows in the list on the map. Up to {MAX_PHOTOS}, and you can change them any time.</p>
+            <PhotoPicker photos={d.photos} onChange={(photos) => set({ photos })} />
           </section>
 
           <section className="card">
@@ -429,7 +448,7 @@ export function HostForm() {
             <div className="field">
               <span id="sec-label">Who can join?</span>
               <div className="choices" role="radiogroup" aria-labelledby="sec-label">
-                <button type="button" role="radio" aria-checked={d.security === 'open'} className={cx('choice', d.security === 'open' && 'is-on')} onClick={() => set({ security: 'open' })} disabled={locked}>
+                <button type="button" role="radio" aria-checked={d.security === 'open'} className={cx('choice', d.security === 'open' && 'is-on')} onClick={() => { set({ security: 'open', minAge: null }); setCustomAge(false); }} disabled={locked}>
                   <Users size={20} aria-hidden />
                   <strong>Open</strong>
                   <span>Anyone with an OTS account can join.</span>
@@ -441,6 +460,33 @@ export function HostForm() {
                 </button>
               </div>
             </div>
+
+            <div className="field">
+              <span id="age-label">
+                Age limit <small>checked against each guest's scanned ID</small>
+              </span>
+              <div className="segmented" role="group" aria-labelledby="age-label">
+                <button type="button" className={cx(d.minAge === null && !customAge && 'is-on')} aria-pressed={d.minAge === null && !customAge} disabled={locked} onClick={() => { set({ minAge: null }); setCustomAge(false); }}>
+                  No limit
+                </button>
+                {ages.map((age) => (
+                  <button type="button" key={age} className={cx(d.minAge === age && !customAge && 'is-on')} aria-pressed={d.minAge === age && !customAge} disabled={locked} onClick={() => { set({ minAge: age, security: 'verified' }); setCustomAge(false); }}>
+                    {age}+
+                  </button>
+                ))}
+                <button type="button" className={cx(customAge && 'is-on')} aria-pressed={customAge} disabled={locked} onClick={() => { set({ minAge: d.minAge ?? config.minAccountAge, security: 'verified' }); setCustomAge(true); }}>
+                  Other
+                </button>
+              </div>
+              {customAge && (
+                <label className="agecustom">
+                  Guests must be at least
+                  <input className="input" type="number" min={config.minAccountAge} max={99} value={d.minAge ?? ''} disabled={locked} aria-label="Minimum age" onChange={(e) => set({ minAge: e.target.value === '' ? null : Math.round(Number(e.target.value)) })} />
+                  years old
+                </label>
+              )}
+              {d.minAge !== null && <p className="fineprint">Anyone younger than {d.minAge} on the day can't join — not on their own and not with a group. An age limit switches on ID-verified guests, because the ID is how the age is checked.</p>}
+            </div>
           </section>
         </div>
 
@@ -448,9 +494,15 @@ export function HostForm() {
           <div className="card summary">
             <span className="eyebrow">Preview</span>
             <div className="summary__preview">
-              <span className={cx('caticon', `caticon--${d.vibe || 'none'}`)} aria-hidden>
-                {category?.emoji ?? '📍'}
-              </span>
+              {d.photos[0] ? (
+                <span className="acard__thumb">
+                  <img src={d.photos[0].url} alt="" />
+                </span>
+              ) : (
+                <span className={cx('caticon', `caticon--${d.vibe || 'none'}`)} aria-hidden>
+                  {category?.emoji ?? '📍'}
+                </span>
+              )}
               <div>
                 <strong>{d.title.trim() || 'Your activity'}</strong>
                 <span className="muted">{startValid ? `${dayLabel(start.toISOString())} ${formatTime(start.toISOString())} · ${durationLabel(d.durationMin)}` : 'Pick a time'}</span>
@@ -458,6 +510,7 @@ export function HostForm() {
                   {d.vibe && <VibeChip vibe={d.vibe} />}
                   <span className="tag">{priceCents ? money(priceCents) : 'Free'}</span>
                   <span className="tag">{plural(d.capacity, 'spot')}</span>
+                  {d.minAge !== null && <span className="tag tag--age">{d.minAge}+</span>}
                 </div>
               </div>
             </div>

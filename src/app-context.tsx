@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { formatMoney } from '../shared/money';
 import type { AppConfig, Me } from '../shared/types';
 import { api, errorMessage, post } from './api';
+import { Intro, LogoMark, shouldPlayIntro } from './components/Logo';
 
 type ToastKind = 'ok' | 'error' | 'info';
 interface Toast {
@@ -33,6 +34,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<Me | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [intro, setIntro] = useState(shouldPlayIntro);
+  const endIntro = useCallback(() => setIntro(false), []);
   const nextId = useRef(1);
 
   useEffect(() => {
@@ -60,10 +63,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [config, user, logout, toast],
   );
 
+  // The opening animation plays over whatever is underneath while the app loads.
+  const opening = intro && <Intro onDone={endIntro} />;
+
   if (failed) {
     return (
       <div className="splash">
-        <div className="logo-mark" aria-hidden />
+        <span className="logo-tile">
+          <LogoMark size={34} />
+        </span>
         <p>{failed}</p>
         <button className="btn btn--primary" onClick={() => window.location.reload()}>
           Try again
@@ -73,13 +81,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
   if (!value) {
     return (
-      <div className="splash" role="status" aria-label="Loading OTS">
-        <div className="logo-mark logo-mark--pulse" aria-hidden />
-      </div>
+      <>
+        {opening}
+        <div className="splash" role="status" aria-label="Loading OTS">
+          <span className="logo-tile logo-tile--pulse">
+            <LogoMark size={40} />
+          </span>
+        </div>
+      </>
     );
   }
   return (
     <AppContext.Provider value={value}>
+      {opening}
       {children}
       <div className="toasts" role="status" aria-live="polite">
         {toasts.map((t) => (

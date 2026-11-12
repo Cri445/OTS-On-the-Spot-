@@ -6,12 +6,25 @@ import { plural } from '../lib/format';
 
 export const cx = (...parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(' ');
 
-export function Avatar({ name, color, size = 36 }: { name: string; color: string; size?: number }) {
+interface AvatarProps {
+  name: string;
+  color: string;
+  /** Their profile picture; without one we show their initial on their colour. */
+  src?: string | null;
+  size?: number;
+}
+
+export function Avatar({ name, color, src, size = 36 }: AvatarProps) {
   return (
     <span className="avatar" style={{ background: color, width: size, height: size, fontSize: size * 0.42 }} aria-hidden>
-      {name.trim().charAt(0).toUpperCase() || '?'}
+      {src ? <img src={src} alt="" loading="lazy" /> : name.trim().charAt(0).toUpperCase() || '?'}
     </span>
   );
+}
+
+/** Shorthand for the common case of showing a member. */
+export function UserAvatar({ user, size }: { user: { displayName: string; avatarColor: string; avatarUrl: string | null }; size?: number }) {
+  return <Avatar name={user.displayName} color={user.avatarColor} src={user.avatarUrl} size={size} />;
 }
 
 export function Spinner({ label = 'Loading' }: { label?: string }) {
@@ -49,6 +62,7 @@ export function ActivityTags({ a, max = 3 }: { a: ActivitySummary; max?: number 
           <ShieldCheck size={13} aria-hidden /> ID only
         </span>
       )}
+      {a.minAge !== null && <span className="tag tag--age">{a.minAge}+</span>}
       {a.tags.slice(0, max).map((t) => (
         <span key={t} className="tag">
           {tagLabel(t)}

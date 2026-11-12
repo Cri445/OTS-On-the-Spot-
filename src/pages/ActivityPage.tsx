@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeft, CalendarClock, DoorOpen, EyeOff, MapPin, Navigation, Pencil, Share2, ShieldCheck, Star, Ticket, Users } from 'lucide-react';
+import { ArrowLeft, CalendarClock, DoorOpen, EyeOff, Images, MapPin, Navigation, Pencil, Share2, ShieldCheck, Star, Ticket, Users } from 'lucide-react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { categoryOf, tagLabel } from '../../shared/catalog';
 import type { ActivityDetail } from '../../shared/types';
@@ -7,8 +7,9 @@ import { api, errorMessage, post } from '../api';
 import { useApp } from '../app-context';
 import { PinMap } from '../components/maps';
 import { PaymentSheet } from '../components/PaymentSheet';
+import { Lightbox } from '../components/Photos';
 import { VerifyIdModal } from '../components/VerifyIdModal';
-import { Avatar, CategoryIcon, LoadState, Modal, SpotsBar, Spinner, VerifiedBadge, VibeChip, cx } from '../components/ui';
+import { Avatar, CategoryIcon, LoadState, Modal, SpotsBar, Spinner, UserAvatar, VerifiedBadge, VibeChip, cx } from '../components/ui';
 import { formatDateTime, formatWhen, phaseOf, plural, prettyCode, timingLabel } from '../lib/format';
 import { useLoad, useNow } from '../lib/use-load';
 
@@ -28,7 +29,8 @@ export function ActivityPage() {
   const id = Number(useParams().id);
   const { user, toast } = useApp();
   const now = useNow();
-  const { data: a, error, loading, reload, setData } = useLoad(() => api<{ activity: ActivityDetail }>(`/activities/${id}`).then((r) => r.activity), [id, user?.id]);
+  const [lightbox, setLightbox] = useState<number | null>(null);
+  const { data: a, error, loading, reload, setData } = useLoad(() => api<{ activity: ActivityDetail }>(`/activities/${id}`).then((r) => r.activity), [id, user?.id, user?.verified]);
 
   if (!a) {
     return (
@@ -40,6 +42,7 @@ export function ActivityPage() {
 
   const phase = phaseOf(a, now);
   const category = categoryOf(a.category);
+  const cover = a.photos[0];
 
   return (
     <div className="page page--wide">
@@ -54,11 +57,26 @@ export function ActivityPage() {
 
       <div className="detail">
         <header className="detail__head">
-          <div className={`hero hero--${a.vibe}`}>
-            <CategoryIcon a={a} size="lg" />
+          <div className={cx('hero', `hero--${a.vibe}`, cover && 'hero--photo')}>
+            {cover ? (
+              <button className="hero__photo" onClick={() => setLightbox(0)} aria-label={`View ${plural(a.photos.length, 'photo')} of the venue`}>
+                <img src={cover.url} alt="" />
+                {a.photos.length > 1 && (
+                  <span className="hero__count">
+                    <Images size={15} aria-hidden /> {a.photos.length} photos
+                  </span>
+                )}
+              </button>
+            ) : (
+              <CategoryIcon a={a} size="lg" />
+            )}
             <div className="hero__chips">
               <VibeChip vibe={a.vibe} />
-              <span className="tag">{category.label}</span>
+              <span className="tag">
+                {cover && <span aria-hidden>{category.emoji} </span>}
+                {category.label}
+              </span>
+              {a.minAge !== null && <span className="tag tag--age">{a.minAge}+</span>}
               {a.featured && (
                 <span className="tag tag--featured">
                   <Star size={12} fill="currentColor" aria-hidden /> Featured
@@ -74,13 +92,13 @@ export function ActivityPage() {
             </div>
           </div>
           <h1>{a.title}</h1>
-          <div className="hostline">
-            <Avatar name={a.host.displayName} color={a.host.avatarColor} size={32} />
+          <Link to={`/u/${a.host.id}`} className="hostline">
+            <UserAvatar user={a.host} size={36} />
             <span>
               Hosted by <strong>{a.host.displayName}</strong>
             </span>
             {a.host.verified && <VerifiedBadge />}
-          </div>
+          </Link>
 
           <dl className="facts">
             <div>
@@ -110,8 +128,8 @@ export function ActivityPage() {
                 <ShieldCheck size={16} aria-hidden /> Who can join
               </dt>
               <dd>
-                {a.security === 'verified' ? 'ID-verified guests only' : 'Open to everyone'}
-                <small>{a.security === 'verified' ? 'The host knows who is on the list' : 'Any OTS member'}</small>
+                {a.minAge !== null ? `ID-verified guests, ${a.minAge} and over` : a.security === 'verified' ? 'ID-verified guests only' : 'Open to everyone'}
+                <small>{a.minAge !== null ? 'Age is checked against each guest\'s ID' : a.security === 'verified' ? 'The host knows who is on the list' : 'Any OTS member'}</small>
               </dd>
             </div>
           </dl>
@@ -126,6 +144,20 @@ export function ActivityPage() {
             <section>
               <h2>About</h2>
               <p className="prose">{a.description}</p>
+            </section>
+          )}
+          {a.photos.length > 1 && (
+            <section>
+              <h2>Photos</h2>
+              <ul className="gallery">
+                {a.photos.map((p, i) => (
+                  <li key={p.id}>
+                    <button onClick={() => setLightbox(i)} aria-label={`Open photo ${i + 1} of ${a.photos.length}`}>
+                      <img src={p.url} alt="" loading="lazy" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </section>
           )}
           {a.tags.length > 0 && (
@@ -148,7 +180,7 @@ export function ActivityPage() {
               <ul className="going">
                 {a.going.map((g, i) => (
                   <li key={i}>
-                    <Avatar name={g.displayName} color={g.avatarColor} size={30} /> {g.displayName}
+                    <Avatar name={g.displayName} color={g.avatarColor} src={g.avatarUrl} size={30} /> {g.displayName}
                   </li>
                 ))}
               </ul>
@@ -169,6 +201,7 @@ export function ActivityPage() {
           </section>
         </div>
       </div>
+      {lightbox !== null && <Lightbox photos={a.photos} start={lightbox} onClose={() => setLightbox(null)} />}
     </div>
   );
 }
@@ -285,6 +318,7 @@ function JoinPanel({ a, now, onChange, reload }: { a: ActivityDetail; now: numbe
 
   const full = a.spotsLeft === 0;
   const needsId = a.security === 'verified' && Boolean(user) && !user!.verified;
+  const tooYoung = a.viewer.tooYoung;
 
   async function partyUp() {
     if (!user) return navigate(loginUrl);
@@ -314,8 +348,18 @@ function JoinPanel({ a, now, onChange, reload }: { a: ActivityDetail; now: numbe
         <div className="callout">
           <ShieldCheck size={18} aria-hidden />
           <div>
-            <strong>ID-verified guests only</strong>
-            <p>This host wants to know who's coming. Verify once and you're set for every ID-only activity.</p>
+            <strong>{a.minAge !== null ? `ID-verified guests, ${a.minAge}+` : 'ID-verified guests only'}</strong>
+            <p>{a.minAge !== null ? 'Your age is checked against your ID.' : "This host wants to know who's coming."} Verify once and you're set for every ID-only activity.</p>
+          </div>
+        </div>
+      )}
+
+      {tooYoung && (
+        <div className="callout">
+          <ShieldCheck size={18} aria-hidden />
+          <div>
+            <strong>This one is for ages {a.minAge} and up</strong>
+            <p>Going by your verified ID you're not old enough on the day, so you can't join this activity.</p>
           </div>
         </div>
       )}
@@ -323,6 +367,10 @@ function JoinPanel({ a, now, onChange, reload }: { a: ActivityDetail; now: numbe
       {!user ? (
         <Link to={loginUrl} className="btn btn--primary btn--block btn--lg">
           Log in to join
+        </Link>
+      ) : tooYoung ? (
+        <Link to="/" className="btn btn--primary btn--block btn--lg">
+          Find something else
         </Link>
       ) : needsId ? (
         <button className="btn btn--primary btn--block btn--lg" onClick={() => setSheet('verify')}>
@@ -334,7 +382,7 @@ function JoinPanel({ a, now, onChange, reload }: { a: ActivityDetail; now: numbe
         </button>
       )}
 
-      <button className={cx('btn btn--ghost btn--block', busy && 'is-busy')} onClick={partyUp} disabled={busy || full}>
+      <button className={cx('btn btn--ghost btn--block', busy && 'is-busy')} onClick={partyUp} disabled={busy || full || tooYoung}>
         <Users size={18} aria-hidden /> Party up with friends
       </button>
       <p className="fineprint">Party up to get in together: either the whole group gets a spot, or nobody is charged.</p>

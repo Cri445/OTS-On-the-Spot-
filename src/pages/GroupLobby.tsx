@@ -7,7 +7,7 @@ import { useApp } from '../app-context';
 import { whenLine } from '../components/ActivityCard';
 import { PaymentSheet } from '../components/PaymentSheet';
 import { VerifyIdModal } from '../components/VerifyIdModal';
-import { Avatar, CategoryIcon, Empty, LoadState, Spinner, VerifiedBadge, cx } from '../components/ui';
+import { CategoryIcon, Empty, LoadState, Spinner, UserAvatar, VerifiedBadge, cx } from '../components/ui';
 import { plural } from '../lib/format';
 import { useNow } from '../lib/use-load';
 import { shareLink } from './ActivityPage';
@@ -283,7 +283,7 @@ export function GroupLobby() {
           <ul className="members">
             {members.map((m) => (
               <li key={m.user.id} className={cx(m.issues.length > 0 && 'has-issue')}>
-                <Avatar name={m.user.displayName} color={m.user.avatarColor} />
+                <UserAvatar user={m.user} />
                 <div className="members__who">
                   <strong>
                     {m.user.displayName}

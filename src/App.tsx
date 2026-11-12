@@ -2,7 +2,8 @@ import type { ReactNode } from 'react';
 import { Compass, Plus, Ticket, User, Wallet as WalletIcon } from 'lucide-react';
 import { Link, NavLink, Navigate, Outlet, Route, Routes, useLocation } from 'react-router';
 import { useApp } from './app-context';
-import { Avatar, Empty } from './components/ui';
+import { Logo } from './components/Logo';
+import { Empty, UserAvatar } from './components/ui';
 import { ActivityPage } from './pages/ActivityPage';
 import { Admin } from './pages/Admin';
 import { AuthPage } from './pages/AuthPage';
@@ -13,6 +14,7 @@ import { GroupLobby } from './pages/GroupLobby';
 import { HostForm } from './pages/HostForm';
 import { Hosting } from './pages/Hosting';
 import { Profile } from './pages/Profile';
+import { PublicProfile } from './pages/PublicProfile';
 import { Tickets } from './pages/Tickets';
 import { Wallet } from './pages/Wallet';
 
@@ -22,8 +24,7 @@ function Shell() {
     <div className="shell">
       <header className="topbar">
         <Link to="/" className="brand" aria-label="OTS — On the Spot, home">
-          <span className="logo-mark" aria-hidden />
-          <span className="brand__name">OTS</span>
+          <Logo height={24} />
           <span className="brand__tag">On the Spot</span>
         </Link>
         <nav className="topnav" aria-label="Main">
@@ -46,7 +47,7 @@ function Shell() {
           </Link>
           {user ? (
             <Link to="/profile" className="topbar__me" aria-label="Your profile">
-              <Avatar name={user.displayName} color={user.avatarColor} size={34} />
+              <UserAvatar user={user} size={34} />
             </Link>
           ) : (
             <Link to="/login" className="btn btn--ghost btn--sm">
@@ -123,6 +124,7 @@ export function App() {
         <Route path="g/:code" element={<Private><GroupLobby /></Private>} />
         <Route path="wallet" element={<Private><Wallet /></Private>} />
         <Route path="profile" element={<Private><Profile /></Private>} />
+        <Route path="u/:id" element={<PublicProfile />} />
         <Route path="checkin/:code" element={<Private><Checkin /></Private>} />
         <Route path="admin" element={<Private><Admin /></Private>} />
         <Route path="login" element={<AuthPage mode="login" />} />

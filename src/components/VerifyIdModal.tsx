@@ -58,7 +58,7 @@ export function VerifyIdModal({ onClose, onVerified }: { onClose: () => void; on
       {step === 'details' && (
         <form onSubmit={next} className="stack">
           <p className="lede">
-            Verified members can join ID-only activities. Hosts of those activities see your legal name on their door list — nobody else does.
+            Verified members can join ID-only activities, including ones with an age limit. Hosts of those activities see your legal name on their door list — nobody else does, and nobody sees your date of birth.
           </p>
           <label className="field">
             <span>Full legal name</span>
@@ -94,7 +94,7 @@ export function VerifyIdModal({ onClose, onVerified }: { onClose: () => void; on
               </button>
             )}
           </div>
-          {config.demoMode && <DemoNote>Your photo stays on this device — nothing is uploaded or stored — and the check passes for anyone aged 18 or over.</DemoNote>}
+          {config.demoMode && <DemoNote>Your photo stays on this device — nothing is uploaded or stored — and the check passes for anyone aged {config.minAccountAge} or over.</DemoNote>}
           <button className="btn btn--primary btn--block" onClick={verify} disabled={!preview}>
             Verify my ID
           </button>
