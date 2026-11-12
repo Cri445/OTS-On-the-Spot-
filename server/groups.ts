@@ -1,7 +1,7 @@
 import type { GroupDTO, GroupListItem, GroupStatus, PayMode } from '../shared/types';
 import { toPublicUser, type UserRow } from './auth';
 import { addLedger, getActivityView, toSummary, type ActivityView } from './activities';
-import { assertActivityOpen, hasLiveTicket, issueTicket } from './booking';
+import { assertActivityOpen, hasLiveTicket, isTooYoung, issueTicket } from './booking';
 import { HttpError, iso, nowIso, randomCode, type Ctx } from './util';
 
 /*
@@ -48,6 +48,7 @@ function membersOf(ctx: Ctx, groupId: number): MemberRow[] {
 function memberIssues(ctx: Ctx, a: ActivityView, m: MemberRow): string[] {
   const issues: string[] = [];
   if (a.security === 'verified' && !m.id_verified_at) issues.push('Needs to verify ID');
+  else if (isTooYoung(a, m)) issues.push(`Under ${a.min_age}`);
   if (hasLiveTicket(ctx, a.id, m.id)) issues.push('Already has a ticket');
   if (a.host_id === m.id) issues.push('Is the host');
   return issues;

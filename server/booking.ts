@@ -2,6 +2,7 @@ import { commissionCents } from '../shared/money';
 import type { TicketDTO } from '../shared/types';
 import type { UserRow } from './auth';
 import { addLedger, getActivityView, PENDING_TTL_MS, toSummary, type ActivityRow, type ActivityView } from './activities';
+import { ageOn } from './identity';
 import { HttpError, iso, nowIso, randomCode, type Ctx } from './util';
 
 export interface TicketRow {
@@ -43,12 +44,23 @@ export function assertActivityOpen(ctx: Ctx, a: ActivityRow): void {
   if (a.ends_at <= nowIso(ctx)) throw new HttpError(409, 'This activity is already over.', 'ended');
 }
 
+/**
+ * Is this person under the activity's age limit? Age is taken from the date of
+ * birth on their verified ID and counted on the day the activity starts.
+ */
+export function isTooYoung(a: Pick<ActivityRow, 'min_age' | 'starts_at'>, user: Pick<UserRow, 'birth_date'>): boolean {
+  if (a.min_age === null) return false;
+  if (!user.birth_date) return true;
+  return ageOn(user.birth_date, new Date(a.starts_at)) < a.min_age;
+}
+
 export function assertCanJoin(ctx: Ctx, a: ActivityRow, user: UserRow): void {
   assertActivityOpen(ctx, a);
   if (a.host_id === user.id) throw new HttpError(409, "You're hosting this one.", 'is_host');
   if (a.security === 'verified' && !user.id_verified_at) {
     throw new HttpError(403, 'This host only lets in guests with a verified ID. Verify yours to join.', 'id_required');
   }
+  if (isTooYoung(a, user)) throw new HttpError(403, `This activity is for ages ${a.min_age} and up.`, 'too_young');
   if (hasLiveTicket(ctx, a.id, user.id)) throw new HttpError(409, 'You already have a spot.', 'already_joined');
 }
 

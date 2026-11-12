@@ -1,21 +1,16 @@
-import { Router, type Request } from 'express';
+import express, { Router, type Request } from 'express';
 import { z } from 'zod';
 import { CATEGORY_IDS, TAG_IDS, VIBE_IDS } from '../shared/catalog';
 import { createActivity, listActivities, updateActivity, type ActivityFilters } from './activities';
-import { endSession, hashPassword, isAdmin, pickAvatarColor, requireUser, startSession, toMe, verifyPassword, type UserRow } from './auth';
+import { endSession, hashPassword, isAdmin, loadUser, pickAvatarColor, requireUser, startSession, toMe, verifyPassword, type UserRow } from './auth';
 import { cancelTicket, joinSolo, listMyTickets } from './booking';
 import { publicConfig } from './config';
 import { addSampleGuests, populateAround } from './demo';
 import { createGroup, getGroup, joinGroup, leaveGroup, listMyGroups, lockGroup, payShare, releaseGroupHold, removeMember } from './groups';
-import { cancelActivity, checkInByCode, getActivityDetail, getAdminStats, getWallet, listAttendees, listHosting, requestPayout, setCheckedIn } from './hosting';
+import { cancelActivity, checkInByCode, getActivityDetail, getAdminStats, getPublicProfile, getWallet, listAttendees, listHosting, requestPayout, setCheckedIn } from './hosting';
+import { deleteImage, IMAGE_TYPES, imageUrl, loadImage, saveImage } from './images';
+import { beginSetup, completeChallenge, disable, finishSetup, recoveryCodesLeft, startChallenge } from './twofactor';
 import { HttpError, intParam, nowIso, parse, type Ctx } from './util';
-
-const registerSchema = z.object({
-  email: z.email('Enter a valid e-mail address.').max(200),
-  password: z.string().min(8, 'Use a password with at least 8 characters.').max(200),
-  displayName: z.string().trim().min(2, 'Tell us what to call you (at least 2 characters).').max(40),
-  adult: z.literal(true, "OTS is for adults. Confirm you're 18 or older."),
-});
 
 const loginSchema = z.object({ email: z.string().max(200), password: z.string().max(200) });
 
@@ -60,6 +55,16 @@ export function buildRouter(ctx: Ctx): Router {
   const r = Router();
   const { db } = ctx;
 
+  const registerSchema = z.object({
+    email: z.email('Enter a valid e-mail address.').max(200),
+    password: z.string().min(8, 'Use a password with at least 8 characters.').max(200),
+    displayName: z.string().trim().min(2, 'Tell us what to call you (at least 2 characters).').max(40),
+    ageConfirmed: z.literal(true, `You need to be ${ctx.config.minAccountAge} or older to use OTS.`),
+  });
+
+  // Uploads arrive as the raw bytes of the image.
+  const rawImage = express.raw({ type: IMAGE_TYPES, limit: '4mb' });
+
   r.get('/config', (_req, res) => {
     res.json(publicConfig(ctx.config, ctx.payments.methods()));
   });
@@ -78,7 +83,7 @@ export function buildRouter(ctx: Ctx): Router {
       input.email.toLowerCase(), hash, input.displayName, pickAvatarColor(count), nowIso(ctx),
     ).lastId;
     startSession(ctx, req, res, id);
-    res.status(201).json({ user: toMe(ctx, db.get<UserRow>('SELECT * FROM users WHERE id = ?', id)!) });
+    res.status(201).json({ user: toMe(ctx, loadUser(ctx, id)) });
   });
 
   r.post('/auth/login', async (req, res) => {
@@ -87,6 +92,18 @@ export function buildRouter(ctx: Ctx): Router {
     // Hash even when the account doesn't exist so the response time doesn't reveal which e-mails are registered.
     const ok = await verifyPassword(input.password, user?.password_hash ?? 'scrypt$AAAAAAAAAAAAAAAAAAAAAA==$AA==');
     if (!user || !ok) throw new HttpError(401, 'Wrong e-mail or password.', 'bad_credentials');
+    if (user.totp_enabled_at) {
+      // Password is right, but this account also wants a code. No session yet.
+      res.json({ twoFactor: { ticket: startChallenge(ctx, user.id) } });
+      return;
+    }
+    startSession(ctx, req, res, user.id);
+    res.json({ user: toMe(ctx, user) });
+  });
+
+  r.post('/auth/login/verify', (req, res) => {
+    const input = parse(z.object({ ticket: z.string().min(10).max(200), code: z.string().min(6, 'Enter the 6-digit code.').max(20) }), req.body);
+    const user = completeChallenge(ctx, input.ticket, input.code);
     startSession(ctx, req, res, user.id);
     res.json({ user: toMe(ctx, user) });
   });
@@ -104,16 +121,74 @@ export function buildRouter(ctx: Ctx): Router {
     const user = requireUser(req);
     const input = parse(profileSchema, req.body);
     db.run('UPDATE users SET display_name = ?, bio = ? WHERE id = ?', input.displayName ?? user.display_name, input.bio ?? user.bio, user.id);
-    res.json({ user: toMe(ctx, db.get<UserRow>('SELECT * FROM users WHERE id = ?', user.id)!) });
+    res.json({ user: toMe(ctx, loadUser(ctx, user.id)) });
+  });
+
+  r.post('/me/avatar', rawImage, (req, res) => {
+    const user = requireUser(req);
+    const id = saveImage(ctx, user.id, 'avatar', req.body);
+    db.run('UPDATE users SET avatar_image = ? WHERE id = ?', id, user.id);
+    deleteImage(ctx, user.avatar_image);
+    res.status(201).json({ user: toMe(ctx, loadUser(ctx, user.id)) });
+  });
+
+  r.delete('/me/avatar', (req, res) => {
+    const user = requireUser(req);
+    db.run('UPDATE users SET avatar_image = NULL WHERE id = ?', user.id);
+    deleteImage(ctx, user.avatar_image);
+    res.json({ user: toMe(ctx, loadUser(ctx, user.id)) });
+  });
+
+  // ---- Two-step login ----------------------------------------------------
+
+  r.post('/me/2fa/setup', (req, res) => {
+    res.json(beginSetup(ctx, requireUser(req)));
+  });
+
+  r.post('/me/2fa/enable', (req, res) => {
+    const user = requireUser(req);
+    const input = parse(z.object({ code: z.string().min(6, 'Enter the 6-digit code.').max(12) }), req.body);
+    const recoveryCodes = finishSetup(ctx, user, input.code);
+    res.json({ recoveryCodes, user: toMe(ctx, loadUser(ctx, user.id)) });
+  });
+
+  r.post('/me/2fa/disable', async (req, res) => {
+    const user = requireUser(req);
+    const input = parse(z.object({ password: z.string().max(200) }), req.body);
+    await disable(ctx, user, input.password);
+    res.json({ user: toMe(ctx, loadUser(ctx, user.id)) });
+  });
+
+  r.get('/me/2fa', (req, res) => {
+    const user = requireUser(req);
+    res.json({ enabled: Boolean(user.totp_enabled_at), recoveryCodesLeft: recoveryCodesLeft(ctx, user.id) });
+  });
+
+  // ---- Pictures ----------------------------------------------------------
+
+  r.post('/images', rawImage, (req, res) => {
+    const id = saveImage(ctx, requireUser(req).id, 'venue', req.body);
+    res.status(201).json({ id, url: imageUrl(id) });
+  });
+
+  r.get('/images/:id', (req, res) => {
+    const image = loadImage(ctx, req.params.id);
+    if (!image) throw new HttpError(404, 'Not found', 'not_found');
+    // Ids are random and an image never changes, so browsers may keep it for good.
+    res.set('Cache-Control', 'public, max-age=31536000, immutable').type(image.mime).send(Buffer.from(image.bytes));
+  });
+
+  r.get('/users/:id', (req, res) => {
+    res.json({ profile: getPublicProfile(ctx, intParam(req.params.id, 'member'), req.user?.id) });
   });
 
   r.post('/me/verify-id', async (req, res) => {
     const user = requireUser(req);
     const input = parse(verifySchema, req.body);
-    const result = await ctx.identity.verify(input, ctx.now());
+    const result = await ctx.identity.verify(input, ctx.now(), ctx.config.minAccountAge);
     if (!result.ok) throw new HttpError(422, result.message, 'id_rejected');
     db.run('UPDATE users SET legal_name = ?, birth_date = ?, id_verified_at = ? WHERE id = ?', input.legalName, input.birthDate, nowIso(ctx), user.id);
-    res.json({ user: toMe(ctx, db.get<UserRow>('SELECT * FROM users WHERE id = ?', user.id)!) });
+    res.json({ user: toMe(ctx, loadUser(ctx, user.id)) });
   });
 
   // ---- Activities --------------------------------------------------------

@@ -85,8 +85,12 @@ export function createApp(ctx: Ctx, opts: { staticDir?: string } = {}) {
       return;
     }
     const status = (err as { status?: number })?.status;
-    if (status === 400 || status === 413) {
-      res.status(status).json({ error: { message: 'That request could not be read.', code: 'bad_request' } });
+    if (status === 413) {
+      res.status(413).json({ error: { message: 'That upload is too large.', code: 'too_large' } });
+      return;
+    }
+    if (status === 400) {
+      res.status(400).json({ error: { message: 'That request could not be read.', code: 'bad_request' } });
       return;
     }
     console.error(err);

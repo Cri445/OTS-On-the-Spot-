@@ -13,7 +13,7 @@ export type IdentityResult = { ok: true } | { ok: false; message: string };
  */
 export interface IdentityProvider {
   readonly name: string;
-  verify(input: IdentityCheck, now: Date): Promise<IdentityResult>;
+  verify(input: IdentityCheck, now: Date, minAge: number): Promise<IdentityResult>;
 }
 
 export function ageOn(birthDate: string, now: Date): number {
@@ -27,15 +27,15 @@ export function ageOn(birthDate: string, now: Date): number {
 /**
  * Simulated check: accepts what the person typed. No document is uploaded or
  * stored anywhere. It still enforces the one rule the platform relies on —
- * members must be adults.
+ * members must have reached the minimum account age.
  */
 export class DemoIdentityProvider implements IdentityProvider {
   readonly name = 'demo';
 
-  async verify(input: IdentityCheck, now: Date): Promise<IdentityResult> {
+  async verify(input: IdentityCheck, now: Date, minAge: number): Promise<IdentityResult> {
     const age = ageOn(input.birthDate, now);
     if (!Number.isFinite(age) || age > 120) return { ok: false, message: 'That date of birth does not look right.' };
-    if (age < 18) return { ok: false, message: 'You need to be 18 or older to verify your ID on OTS.' };
+    if (age < minAge) return { ok: false, message: `You need to be ${minAge} or older to use OTS.` };
     return { ok: true };
   }
 }

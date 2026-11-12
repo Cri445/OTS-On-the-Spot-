@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { CATEGORY_IDS, TAG_IDS, VIBE_IDS, type CategoryId, type TagId, type VibeId } from '../shared/catalog';
 import type { ActivityInput, ActivitySummary, Security } from '../shared/types';
 import type { UserRow } from './auth';
+import { checkVenuePhotos, imageUrl } from './images';
 import { HttpError, iso, nowIso, type Ctx } from './util';
 
 export interface ActivityRow {
@@ -27,12 +28,15 @@ export interface ActivityRow {
   status: string;
   cancelled_at: string | null;
   created_at: string;
+  photos: string;
+  min_age: number | null;
 }
 
 /** An activity plus the bits every screen needs: its host, how full it is, and whether the viewer is going. */
 export interface ActivityView extends ActivityRow {
   host_name: string;
   host_color: string;
+  host_avatar: string | null;
   host_verified: string | null;
   taken: number;
   viewer_ticket: number;
@@ -43,7 +47,7 @@ export const PENDING_TTL_MS = 2 * 60_000;
 
 // Spots taken = tickets + spots a group is holding while its members pay.
 const VIEW_SQL = `
-SELECT a.*, u.display_name AS host_name, u.avatar_color AS host_color, u.id_verified_at AS host_verified,
+SELECT a.*, u.display_name AS host_name, u.avatar_color AS host_color, u.avatar_image AS host_avatar, u.id_verified_at AS host_verified,
   (SELECT COUNT(*) FROM tickets t
      WHERE t.activity_id = a.id AND (t.status = 'active' OR (t.status = 'pending' AND t.created_at > ?)))
   + (SELECT COUNT(*) FROM group_members gm JOIN groups g ON g.id = gm.group_id
@@ -81,9 +85,11 @@ export function toSummary(row: ActivityView, viewerId?: number): ActivitySummary
     spotsLeft: Math.max(0, row.capacity - row.taken),
     priceCents: row.price_cents,
     security: row.security as Security,
+    minAge: row.min_age,
     featured: Boolean(row.featured),
     status: row.status as 'active' | 'cancelled',
-    host: { id: row.host_id, displayName: row.host_name, avatarColor: row.host_color, verified: Boolean(row.host_verified) },
+    coverUrl: imageUrl((JSON.parse(row.photos) as string[])[0]),
+    host: { id: row.host_id, displayName: row.host_name, avatarColor: row.host_color, avatarUrl: imageUrl(row.host_avatar), verified: Boolean(row.host_verified) },
   };
 }
 
@@ -143,7 +149,7 @@ export function listActivities(ctx: Ctx, viewerId: number | undefined, f: Activi
 const isoDate = z.string().refine((s) => !Number.isNaN(Date.parse(s)), 'Pick a valid date and time.');
 
 export function activityInputSchema(ctx: Ctx) {
-  const { minPriceCents, maxPriceCents } = ctx.config;
+  const { minPriceCents, maxPriceCents, minAccountAge } = ctx.config;
   return z.object({
     title: z.string().trim().min(3, 'Give your activity a title (at least 3 characters).').max(80, 'Keep the title under 80 characters.'),
     description: z.string().trim().max(2000, 'Keep the description under 2000 characters.').default(''),
@@ -164,7 +170,25 @@ export function activityInputSchema(ctx: Ctx) {
         message: `Make it free, or charge between ${minPriceCents / 100} and ${maxPriceCents / 100}.`,
       }),
     security: z.enum(['open', 'verified'], 'Choose who can join.'),
+    minAge: z
+      .number()
+      .int()
+      .min(minAccountAge, `The age limit can't be lower than ${minAccountAge}, the youngest age on OTS.`)
+      .max(99, 'That age limit is too high.')
+      .nullable()
+      .default(null),
+    photos: z.array(z.string().regex(/^[0-9a-f]{32}$/, 'That photo could not be found.')).max(MAX_PHOTOS, `Add up to ${MAX_PHOTOS} photos.`).default([]),
   });
+}
+
+export const MAX_PHOTOS = 8;
+
+/** Rules that span several fields. */
+function checkRules(input: ActivityInput): void {
+  // An age can only be checked against a scanned ID.
+  if (input.minAge !== null && input.security !== 'verified') {
+    throw new HttpError(400, 'An age limit needs ID-verified guests — that is how the age is checked.', 'validation');
+  }
 }
 
 function checkTimes(ctx: Ctx, startsAt: string, endsAt: string): void {
@@ -207,8 +231,8 @@ export function insertActivity(ctx: Ctx, hostId: number, input: ActivityInput, f
   const pub = input.hideExact ? fuzz(input.lat, input.lng) : { lat: input.lat, lng: input.lng };
   return ctx.db.run(
     `INSERT INTO activities (host_id, title, description, category, vibe, tags, lat, lng, public_lat, public_lng, address, hide_exact,
-       starts_at, ends_at, capacity, price_cents, security, featured, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+       starts_at, ends_at, capacity, price_cents, security, min_age, photos, featured, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
     hostId,
     input.title,
     input.description,
@@ -226,6 +250,8 @@ export function insertActivity(ctx: Ctx, hostId: number, input: ActivityInput, f
     input.capacity,
     input.priceCents,
     input.security,
+    input.minAge,
+    JSON.stringify(input.photos),
     featured ? 1 : 0,
     nowIso(ctx),
   ).lastId;
@@ -238,6 +264,8 @@ export async function createActivity(ctx: Ctx, host: UserRow, body: unknown): Pr
   if (!result.success) throw new HttpError(400, result.error.issues[0].message, 'validation');
   const { featured, paymentMethod, ...input } = result.data;
   checkTimes(ctx, input.startsAt, input.endsAt);
+  checkRules(input);
+  input.photos = checkVenuePhotos(ctx, host.id, input.photos);
 
   const fee = featured ? ctx.config.listingFeeFeaturedCents : ctx.config.listingFeeStandardCents;
   let ref: string | null = null;
@@ -270,7 +298,7 @@ export async function createActivity(ctx: Ctx, host: UserRow, body: unknown): Pr
 }
 
 /** Fields that can't change once someone has a spot — they agreed to this time, place and price. */
-const LOCKED_ONCE_JOINED = ['startsAt', 'endsAt', 'lat', 'lng', 'address', 'hideExact', 'priceCents', 'security'] as const;
+const LOCKED_ONCE_JOINED = ['startsAt', 'endsAt', 'lat', 'lng', 'address', 'hideExact', 'priceCents', 'security', 'minAge'] as const;
 
 export function updateActivity(ctx: Ctx, host: UserRow, id: number, body: unknown): void {
   const row = getActivityView(ctx, id, host.id);
@@ -293,6 +321,8 @@ export function updateActivity(ctx: Ctx, host: UserRow, id: number, body: unknow
     capacity: row.capacity,
     priceCents: row.price_cents,
     security: row.security as Security,
+    minAge: row.min_age,
+    photos: JSON.parse(row.photos) as string[],
   };
   const patch = activityInputSchema(ctx).partial().safeParse(body);
   if (!patch.success) throw new HttpError(400, patch.error.issues[0].message, 'validation');
@@ -309,13 +339,15 @@ export function updateActivity(ctx: Ctx, host: UserRow, id: number, body: unknow
     throw new HttpError(409, `${row.taken} spots are already taken — you can't go below that.`, 'capacity');
   }
   if (changed('startsAt') || changed('endsAt')) checkTimes(ctx, next.startsAt, next.endsAt);
+  checkRules(next);
+  if (changed('photos')) next.photos = checkVenuePhotos(ctx, host.id, next.photos);
 
   const moved = changed('lat') || changed('lng') || changed('hideExact');
   const pub = !moved ? { lat: row.public_lat, lng: row.public_lng } : next.hideExact ? fuzz(next.lat, next.lng) : { lat: next.lat, lng: next.lng };
   ctx.db.run(
     `UPDATE activities SET title = ?, description = ?, category = ?, vibe = ?, tags = ?, lat = ?, lng = ?, public_lat = ?, public_lng = ?,
-       address = ?, hide_exact = ?, starts_at = ?, ends_at = ?, capacity = ?, price_cents = ?, security = ? WHERE id = ?`,
+       address = ?, hide_exact = ?, starts_at = ?, ends_at = ?, capacity = ?, price_cents = ?, security = ?, min_age = ?, photos = ? WHERE id = ?`,
     next.title, next.description, next.category, next.vibe, JSON.stringify(next.tags), next.lat, next.lng, pub.lat, pub.lng,
-    next.address, next.hideExact ? 1 : 0, next.startsAt, next.endsAt, next.capacity, next.priceCents, next.security, id,
+    next.address, next.hideExact ? 1 : 0, next.startsAt, next.endsAt, next.capacity, next.priceCents, next.security, next.minAge, JSON.stringify(next.photos), id,
   );
 }

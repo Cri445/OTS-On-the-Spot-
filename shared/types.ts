@@ -9,6 +9,8 @@ export interface PublicUser {
   id: number;
   displayName: string;
   avatarColor: string;
+  /** Their profile picture, if they have uploaded one. */
+  avatarUrl: string | null;
   verified: boolean;
 }
 
@@ -17,6 +19,20 @@ export interface Me extends PublicUser {
   bio: string;
   legalName: string | null;
   isAdmin: boolean;
+  twoFactorEnabled: boolean;
+}
+
+/** What anyone can see about a member. */
+export interface PublicProfile {
+  user: PublicUser;
+  bio: string;
+  memberSince: string;
+  activities: ActivitySummary[];
+}
+
+export interface Photo {
+  id: string;
+  url: string;
 }
 
 export interface PaymentMethodOption {
@@ -35,6 +51,7 @@ export interface AppConfig {
   maxGroupSize: number;
   minPriceCents: number;
   maxPriceCents: number;
+  minAccountAge: number;
   mapCenter: { lat: number; lng: number; zoom: number };
   tileUrl: string;
   tileAttribution: string;
@@ -59,8 +76,12 @@ export interface ActivitySummary {
   spotsLeft: number;
   priceCents: number;
   security: Security;
+  /** Guests must be at least this old on the day, checked against their verified ID. */
+  minAge: number | null;
   featured: boolean;
   status: 'active' | 'cancelled';
+  /** The first venue photo, if the host has added any. */
+  coverUrl: string | null;
   host: PublicUser;
 }
 
@@ -81,10 +102,13 @@ export interface ActivityDetail extends ActivitySummary {
   hideExact: boolean;
   goingCount: number;
   /** Names are only shared with the host and with people who are going. */
-  going: { displayName: string; avatarColor: string }[] | null;
+  going: { displayName: string; avatarColor: string; avatarUrl: string | null }[] | null;
+  photos: Photo[];
   refundableUntil: string;
   viewer: {
     isHost: boolean;
+    /** Verified, but not old enough for this activity's age limit. */
+    tooYoung: boolean;
     ticket: TicketDTO | null;
     group: { code: string; status: GroupStatus; size: number } | null;
   };
@@ -124,6 +148,7 @@ export interface Attendee {
   code: string;
   displayName: string;
   avatarColor: string;
+  avatarUrl: string | null;
   verified: boolean;
   /** Only present when the activity requires verified ID. */
   legalName: string | null;
@@ -186,4 +211,7 @@ export interface ActivityInput {
   capacity: number;
   priceCents: number;
   security: Security;
+  minAge: number | null;
+  /** Ids of uploaded venue photos; the first is the cover. */
+  photos: string[];
 }

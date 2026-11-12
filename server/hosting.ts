@@ -1,7 +1,8 @@
-import type { ActivityDetail, AdminStats, Attendee, HostingItem, LedgerEntry, WalletDTO } from '../shared/types';
-import type { UserRow } from './auth';
+import type { ActivityDetail, AdminStats, Attendee, HostingItem, LedgerEntry, PublicProfile, WalletDTO } from '../shared/types';
+import { toPublicUser, type UserRow } from './auth';
 import { addLedger, getActivityView, toSummary, type ActivityView } from './activities';
-import { refundTicket, toTicketDTO, type TicketRow } from './booking';
+import { isTooYoung, refundTicket, toTicketDTO, type TicketRow } from './booking';
+import { imageUrl } from './images';
 import { closeGroupsOf, viewerGroup } from './groups';
 import { HttpError, iso, nowIso, type Ctx } from './util';
 
@@ -11,8 +12,8 @@ export function getActivityDetail(ctx: Ctx, id: number, viewer?: UserRow): Activ
   const ticketRow = viewer
     ? ctx.db.get<TicketRow>(`SELECT * FROM tickets WHERE activity_id = ? AND user_id = ? AND status = 'active'`, a.id, viewer.id)
     : undefined;
-  const going = ctx.db.all<{ display_name: string; avatar_color: string }>(
-    `SELECT u.display_name, u.avatar_color FROM tickets t JOIN users u ON u.id = t.user_id
+  const going = ctx.db.all<{ display_name: string; avatar_color: string; avatar_image: string | null }>(
+    `SELECT u.display_name, u.avatar_color, u.avatar_image FROM tickets t JOIN users u ON u.id = t.user_id
      WHERE t.activity_id = ? AND t.status = 'active' ORDER BY t.id`,
     a.id,
   );
@@ -22,10 +23,12 @@ export function getActivityDetail(ctx: Ctx, id: number, viewer?: UserRow): Activ
     description: a.description,
     hideExact: Boolean(a.hide_exact),
     goingCount: going.length,
-    going: seesNames ? going.map((g) => ({ displayName: g.display_name, avatarColor: g.avatar_color })) : null,
+    going: seesNames ? going.map((g) => ({ displayName: g.display_name, avatarColor: g.avatar_color, avatarUrl: imageUrl(g.avatar_image) })) : null,
+    photos: (JSON.parse(a.photos) as string[]).map((id) => ({ id, url: imageUrl(id)! })),
     refundableUntil: iso(new Date(Date.parse(a.starts_at) - ctx.config.refundCutoffMinutes * 60_000)),
     viewer: {
       isHost,
+      tooYoung: Boolean(viewer?.id_verified_at) && !isHost && isTooYoung(a, viewer!),
       ticket: ticketRow && viewer ? toTicketDTO(ctx, ticketRow, a, viewer.id) : null,
       group: viewer && !isHost ? viewerGroup(ctx, viewer.id, a.id) : null,
     },
@@ -64,8 +67,8 @@ export async function cancelActivity(ctx: Ctx, host: UserRow, id: number): Promi
 /** The door list: who has a ticket, and who has arrived. */
 export function listAttendees(ctx: Ctx, host: UserRow, id: number): Attendee[] {
   const a = hostedActivity(ctx, host, id);
-  const rows = ctx.db.all<TicketRow & { display_name: string; avatar_color: string; id_verified_at: string | null; legal_name: string | null; group_code: string | null }>(
-    `SELECT t.*, u.display_name, u.avatar_color, u.id_verified_at, u.legal_name, g.code AS group_code
+  const rows = ctx.db.all<TicketRow & { display_name: string; avatar_color: string; avatar_image: string | null; id_verified_at: string | null; legal_name: string | null; group_code: string | null }>(
+    `SELECT t.*, u.display_name, u.avatar_color, u.avatar_image, u.id_verified_at, u.legal_name, g.code AS group_code
      FROM tickets t JOIN users u ON u.id = t.user_id LEFT JOIN groups g ON g.id = t.group_id
      WHERE t.activity_id = ? AND t.status = 'active' ORDER BY t.id`,
     a.id,
@@ -75,6 +78,7 @@ export function listAttendees(ctx: Ctx, host: UserRow, id: number): Attendee[] {
     code: r.code,
     displayName: r.display_name,
     avatarColor: r.avatar_color,
+    avatarUrl: imageUrl(r.avatar_image),
     verified: Boolean(r.id_verified_at),
     // Legal names are only shared for ID-required activities — guests are told so before they join.
     legalName: a.security === 'verified' ? r.legal_name : null,
@@ -106,6 +110,19 @@ export function checkInByCode(ctx: Ctx, host: UserRow, rawCode: string): { atten
   if (!already) ctx.db.run('UPDATE tickets SET checked_in_at = ? WHERE id = ?', nowIso(ctx), t.id);
   const attendee = listAttendees(ctx, host, a.id).find((x) => x.ticketId === t.id)!;
   return { attendee, activityId: a.id, activityTitle: a.title, alreadyCheckedIn: already };
+}
+
+/** A member's public page: who they are and what they're hosting. Never includes e-mail, legal name or age. */
+export function getPublicProfile(ctx: Ctx, userId: number, viewerId?: number): PublicProfile {
+  const user = ctx.db.get<UserRow>('SELECT * FROM users WHERE id = ?', userId);
+  if (!user) throw new HttpError(404, 'That member does not exist.', 'not_found');
+  const ids = ctx.db.all<{ id: number }>(`SELECT id FROM activities WHERE host_id = ? AND status = 'active' AND ends_at > ? ORDER BY starts_at LIMIT 50`, userId, nowIso(ctx));
+  return {
+    user: toPublicUser(user),
+    bio: user.bio,
+    memberSince: user.created_at,
+    activities: ids.map(({ id }) => toSummary(getActivityView(ctx, id, viewerId), viewerId)),
+  };
 }
 
 export function listHosting(ctx: Ctx, host: UserRow): HostingItem[] {

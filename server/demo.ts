@@ -31,6 +31,7 @@ interface Sample {
   price: number;
   capacity: number;
   security?: Security;
+  minAge?: number;
   hideExact?: boolean;
   featured?: boolean;
   when: When;
@@ -44,7 +45,7 @@ const SAMPLES: Sample[] = [
     title: 'Rooftop house party — need 15 more!',
     description: 'Half the guest list bailed, the speakers did not. Rooftop with a view, DJ from 10, bring good energy. Drinks on the roof bar, first one is on me.',
     category: 'party', vibe: 'lively', tags: ['drinks', 'dancing', 'big-crowd'], price: 1200, capacity: 40,
-    security: 'verified', hideExact: true, featured: true, when: { day: 0, hour: 21 }, hours: 5, fill: 0.6,
+    security: 'verified', minAge: 18, hideExact: true, featured: true, when: { day: 0, hour: 21 }, hours: 5, fill: 0.6,
   },
   {
     title: 'Board games & craft beer',
@@ -86,7 +87,7 @@ const SAMPLES: Sample[] = [
     title: 'Karaoke night — bring your worst voice',
     description: 'Private room for 25, song book the size of a phone directory. Duets strongly encouraged.',
     category: 'music', vibe: 'lively', tags: ['indoor', 'drinks'], price: 800, capacity: 25,
-    security: 'verified', when: { day: 1, hour: 21 }, hours: 3, fill: 0.45,
+    security: 'verified', minAge: 16, when: { day: 1, hour: 21 }, hours: 3, fill: 0.45,
   },
   {
     title: 'Morning run club · easy 5K',
@@ -110,7 +111,7 @@ const SAMPLES: Sample[] = [
     title: 'Open-air techno in the courtyard',
     description: 'Three DJs, one courtyard, sound until late. Verified guests only — you will be on the door list by name.',
     category: 'party', vibe: 'lively', tags: ['outdoor', 'dancing', 'big-crowd', 'live-music'], price: 1500, capacity: 120,
-    security: 'verified', featured: true, when: { day: 2, hour: 22 }, hours: 6, fill: 0.55,
+    security: 'verified', minAge: 18, featured: true, when: { day: 2, hour: 22 }, hours: 6, fill: 0.55,
   },
   {
     title: 'Bouldering for beginners',
@@ -202,6 +203,8 @@ export function seedAround(ctx: Ctx, lat: number, lng: number, tzOffsetMinutes: 
           capacity: s.capacity,
           priceCents: s.price,
           security: s.security ?? 'open',
+          minAge: s.minAge ?? null,
+          photos: [],
         },
         s.featured ?? false,
       );

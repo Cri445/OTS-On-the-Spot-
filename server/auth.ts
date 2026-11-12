@@ -1,6 +1,7 @@
 import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import type { Me, PublicUser } from '../shared/types';
+import { imageUrl } from './images';
 import { HttpError, iso, type Ctx } from './util';
 
 export interface UserRow {
@@ -15,6 +16,11 @@ export interface UserRow {
   id_verified_at: string | null;
   is_demo: number;
   created_at: string;
+  avatar_image: string | null;
+  totp_secret: string | null;
+  totp_pending: string | null;
+  totp_enabled_at: string | null;
+  totp_last_step: number;
 }
 
 declare module 'express-serve-static-core' {
@@ -50,7 +56,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
 }
 
 // Only a hash of the session token is stored, so a leaked database can't be used to log in.
-const hashToken = (token: string): string => createHash('sha256').update(token).digest('hex');
+export const hashToken = (token: string): string => createHash('sha256').update(token).digest('hex');
 
 export function startSession(ctx: Ctx, req: Request, res: Response, userId: number): void {
   const token = randomBytes(32).toString('base64url');
@@ -104,10 +110,12 @@ export function requireUser(req: Request): UserRow {
 
 export const isAdmin = (ctx: Ctx, user: UserRow): boolean => ctx.config.adminEmails.includes(user.email.toLowerCase());
 
-export function toPublicUser(u: { id: number; display_name: string; avatar_color: string; id_verified_at: string | null }): PublicUser {
-  return { id: u.id, displayName: u.display_name, avatarColor: u.avatar_color, verified: Boolean(u.id_verified_at) };
+export function toPublicUser(u: { id: number; display_name: string; avatar_color: string; avatar_image: string | null; id_verified_at: string | null }): PublicUser {
+  return { id: u.id, displayName: u.display_name, avatarColor: u.avatar_color, avatarUrl: imageUrl(u.avatar_image), verified: Boolean(u.id_verified_at) };
 }
 
 export function toMe(ctx: Ctx, u: UserRow): Me {
-  return { ...toPublicUser(u), email: u.email, bio: u.bio, legalName: u.legal_name, isAdmin: isAdmin(ctx, u) };
+  return { ...toPublicUser(u), email: u.email, bio: u.bio, legalName: u.legal_name, isAdmin: isAdmin(ctx, u), twoFactorEnabled: Boolean(u.totp_enabled_at) };
 }
+
+export const loadUser = (ctx: Ctx, id: number): UserRow => ctx.db.get<UserRow>('SELECT * FROM users WHERE id = ?', id)!;

@@ -28,9 +28,22 @@ export class Client {
     return { status: res.status, body: await res.json() };
   }
 
+  /** Send raw bytes, the way the web app uploads a picture. */
+  async upload(path: string, bytes: Uint8Array, type: string): Promise<{ status: number; body: any }> {
+    const res = await fetch(this.base + path, { method: 'POST', headers: { 'content-type': type, ...(this.cookie ? { cookie: this.cookie } : {}) }, body: bytes });
+    return { status: res.status, body: await res.json() };
+  }
+
+  /** Fetch something that isn't JSON. Accepts the "/api/..." URLs the API hands out. */
+  async download(url: string): Promise<{ status: number; type: string | null; bytes: Buffer }> {
+    const res = await fetch(this.base + url.replace(/^\/api/, ''));
+    return { status: res.status, type: res.headers.get('content-type'), bytes: Buffer.from(await res.arrayBuffer()) };
+  }
+
   get = (path: string) => this.req('GET', path);
   post = (path: string, body: unknown = {}) => this.req('POST', path, body);
   patch = (path: string, body: unknown) => this.req('PATCH', path, body);
+  delete = (path: string) => this.req('DELETE', path);
 }
 
 export interface TestApp {
@@ -65,7 +78,7 @@ export async function startTestApp(overrides: Partial<Config> = {}): Promise<Tes
     },
     async person(name, opts = {}) {
       const c = new Client(base);
-      const res = await c.post('/auth/register', { email: `${name.toLowerCase()}@example.com`, password: 'correct horse', displayName: name, adult: true });
+      const res = await c.post('/auth/register', { email: `${name.toLowerCase()}@example.com`, password: 'correct horse', displayName: name, ageConfirmed: true });
       if (res.status !== 201) throw new Error(`sign-up failed: ${JSON.stringify(res.body)}`);
       c.id = res.body.user.id;
       if (opts.verified) {

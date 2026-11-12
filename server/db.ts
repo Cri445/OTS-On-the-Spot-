@@ -123,12 +123,56 @@ CREATE TABLE IF NOT EXISTS ledger (
 CREATE INDEX IF NOT EXISTS ledger_user ON ledger(user_id, id);
 `;
 
+/*
+ * Changes to the schema above go here, one entry per release, and are applied
+ * in order to databases created by an earlier version. Never edit an entry
+ * that has shipped — add a new one.
+ */
+const MIGRATIONS: string[] = [
+  // 2: profile pictures, venue photos, age limits, two-step login
+  `
+  ALTER TABLE users ADD COLUMN avatar_image TEXT;
+  ALTER TABLE users ADD COLUMN totp_secret TEXT;
+  ALTER TABLE users ADD COLUMN totp_pending TEXT;
+  ALTER TABLE users ADD COLUMN totp_enabled_at TEXT;
+  ALTER TABLE users ADD COLUMN totp_last_step INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE activities ADD COLUMN photos TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE activities ADD COLUMN min_age INTEGER;
+
+  CREATE TABLE images (
+    id TEXT PRIMARY KEY,
+    owner_id INTEGER NOT NULL REFERENCES users(id),
+    kind TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    bytes BLOB NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX images_owner ON images(owner_id, kind);
+
+  CREATE TABLE recovery_codes (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash TEXT NOT NULL,
+    PRIMARY KEY (user_id, code_hash)
+  );
+
+  -- A password that checked out, waiting for the second step of a two-step login.
+  CREATE TABLE login_challenges (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    expires_at TEXT NOT NULL
+  );
+  `,
+];
+
 export interface RunResult {
   changes: number;
   lastId: number;
 }
 
 /** A thin, synchronous wrapper over Node's built-in SQLite. */
+export const BASE_SCHEMA = SCHEMA;
+
 export class Db {
   private readonly raw: DatabaseSync;
   private readonly cache = new Map<string, StatementSync>();
@@ -139,6 +183,25 @@ export class Db {
     this.raw = new DatabaseSync(path);
     this.raw.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     this.raw.exec(SCHEMA);
+    this.migrate();
+  }
+
+  /** Bring an older database up to date. The base schema above is version 1. */
+  private migrate(): void {
+    const row = this.raw.prepare('PRAGMA user_version').get() as { user_version: number };
+    let version = Math.max(1, Number(row.user_version));
+    while (version <= MIGRATIONS.length) {
+      this.raw.exec('BEGIN IMMEDIATE');
+      try {
+        this.raw.exec(MIGRATIONS[version - 1]);
+        this.raw.exec(`PRAGMA user_version = ${version + 1}`);
+        this.raw.exec('COMMIT');
+      } catch (err) {
+        this.raw.exec('ROLLBACK');
+        throw err;
+      }
+      version++;
+    }
   }
 
   private stmt(sql: string): StatementSync {

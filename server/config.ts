@@ -24,6 +24,8 @@ export interface Config {
   maxGroupSize: number;
   minPriceCents: number;
   maxPriceCents: number;
+  /** Youngest age allowed to hold an account. Activities can ask for more. */
+  minAccountAge: number;
   mapCenter: { lat: number; lng: number; zoom: number };
   tileUrl: string;
   tileAttribution: string;
@@ -49,6 +51,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     maxGroupSize: num(env, 'MAX_GROUP_SIZE', 8),
     minPriceCents: num(env, 'MIN_PRICE_CENTS', 100),
     maxPriceCents: num(env, 'MAX_PRICE_CENTS', 50_000),
+    minAccountAge: num(env, 'MIN_ACCOUNT_AGE', 16),
     mapCenter: {
       lat: num(env, 'MAP_CENTER_LAT', 40.7359),
       lng: num(env, 'MAP_CENTER_LNG', -73.9911),
@@ -79,6 +82,7 @@ export function publicConfig(c: Config, paymentMethods: AppConfig['paymentMethod
     maxGroupSize: c.maxGroupSize,
     minPriceCents: c.minPriceCents,
     maxPriceCents: c.maxPriceCents,
+    minAccountAge: c.minAccountAge,
     mapCenter: c.mapCenter,
     tileUrl: c.tileUrl,
     tileAttribution: c.tileAttribution,

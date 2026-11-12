@@ -36,10 +36,10 @@ scenario('accounts: sign up, log out, log back in', async (t) => {
 scenario('accounts: duplicate e-mails, weak passwords and minors are turned away', async (t) => {
   await t.person('Ana');
   const c = t.anonymous();
-  const base = { email: 'new@example.com', password: 'correct horse', displayName: 'New', adult: true };
+  const base = { email: 'new@example.com', password: 'correct horse', displayName: 'New', ageConfirmed: true };
   assert.equal((await c.post('/auth/register', { ...base, email: 'ana@example.com' })).status, 409);
   assert.equal((await c.post('/auth/register', { ...base, password: 'short' })).status, 400);
-  assert.equal((await c.post('/auth/register', { ...base, adult: false })).status, 400);
+  assert.equal((await c.post('/auth/register', { ...base, ageConfirmed: false })).status, 400);
   assert.equal((await c.get('/tickets')).status, 401);
 });
 
