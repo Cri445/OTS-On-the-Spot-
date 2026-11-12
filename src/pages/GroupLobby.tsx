@@ -211,7 +211,7 @@ export function GroupLobby() {
             </button>
           </div>
         )}
-        <p className="fineprint">All {members.length} of you get a spot, or none of you do. Nobody is left outside.</p>
+        <p className="fineprint">{members.length === 2 ? 'Both of you get a spot, or neither does.' : `All ${members.length} of you get a spot, or none of you do.`} Nobody is left outside.</p>
       </div>
     );
   } else {
